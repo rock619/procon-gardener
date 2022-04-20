@@ -14,8 +14,8 @@ import (
 	"strings"
 	"time"
 
-	"gopkg.in/src-d/go-git.v4"
-	"gopkg.in/src-d/go-git.v4/plumbing/object"
+	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing/object"
 
 	"github.com/PuerkitoBio/goquery"
 
@@ -25,8 +25,10 @@ import (
 	cli "github.com/urfave/cli/v2"
 )
 
-const APP_NAME = "procon-gardener"
-const ATCODER_API_SUBMISSION_URL = "https://kenkoooo.com/atcoder/atcoder-api/results?user="
+const (
+	APP_NAME                   = "procon-gardener"
+	ATCODER_API_SUBMISSION_URL = "https://kenkoooo.com/atcoder/atcoder-api/results?user="
+)
 
 type AtCoderSubmission struct {
 	ID            int     `json:"id"`
@@ -48,6 +50,7 @@ func isDirExist(path string) bool {
 	}
 	return info.IsDir()
 }
+
 func isFileExist(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
@@ -58,15 +61,16 @@ type Service struct {
 	UserID         string `json:"user_id"`
 	UserEmail      string `json:"user_email"`
 }
+
 type Config struct {
 	Atcoder Service `json:"atcoder"`
 }
 
 func languageToFileName(language string) string {
-	//e.g C++14 (GCC 5.4.1)
-	//C++14
+	// e.g C++14 (GCC 5.4.1)
+	// C++14
 	language = strings.Split(language, "(")[0]
-	//remove extra last whitespace
+	// remove extra last whitespace
 	language = language[:len(language)-1]
 	if strings.HasPrefix(language, "C++") {
 		return "Main.cpp"
@@ -75,8 +79,8 @@ func languageToFileName(language string) string {
 		return "Main.sh"
 	}
 
-	//C (GCC 5.4.1)
-	//C (Clang 3.8.0)
+	// C (GCC 5.4.1)
+	// C (Clang 3.8.0)
 	if language == "C" {
 		return "Main.c"
 	}
@@ -93,7 +97,7 @@ func languageToFileName(language string) string {
 		return "Main.lisp"
 	}
 
-	//D (DMD64 v2.070.1)
+	// D (DMD64 v2.070.1)
 	if language == "D" {
 		return "Main.d"
 	}
@@ -249,7 +253,6 @@ func languageToFileName(language string) string {
 }
 
 func initCmd(strict bool) {
-
 	log.Println("Initialize your config...")
 	home, err := homedir.Dir()
 	if err != nil {
@@ -258,7 +261,7 @@ func initCmd(strict bool) {
 	}
 	configDir := filepath.Join(home, "."+APP_NAME)
 	if !isDirExist(configDir) {
-		err = os.MkdirAll(configDir, 0700)
+		err = os.MkdirAll(configDir, 0o700)
 		if err != nil {
 			log.Println(err)
 			return
@@ -267,7 +270,7 @@ func initCmd(strict bool) {
 
 	configFile := filepath.Join(configDir, "config.json")
 	if strict || !isFileExist(configFile) {
-		//initial config
+		// initial config
 		atcoder := Service{RepositoryPath: "", UserID: ""}
 
 		config := Config{Atcoder: atcoder}
@@ -309,7 +312,7 @@ func loadConfig() (*Config, error) {
 }
 
 func archiveFile(code, fileName, path string, submission AtCoderSubmission) error {
-	if err := os.MkdirAll(path, 0700); err != nil {
+	if err := os.MkdirAll(path, 0o700); err != nil {
 		return err
 	}
 	filePath := filepath.Join(path, fileName)
@@ -321,7 +324,7 @@ func archiveFile(code, fileName, path string, submission AtCoderSubmission) erro
 	file.WriteString(code)
 
 	{
-		//save submission json file
+		// save submission json file
 		jsonBytes, err := json.MarshalIndent(submission, "", "\t")
 		if err != nil {
 			log.Println(err)
@@ -361,12 +364,12 @@ func archiveCmd() {
 		return
 	}
 
-	//only ac
+	// only ac
 	ss = funk.Filter(ss, func(s AtCoderSubmission) bool {
 		return s.Result == "AC"
 	}).([]AtCoderSubmission)
 
-	//skip the already archived code
+	// skip the already archived code
 	archivedKeys := map[string]struct{}{}
 	filepath.Walk(config.Atcoder.RepositoryPath, func(path string, info os.FileInfo, err error) error {
 		if !info.IsDir() && strings.HasSuffix(path, "submission.json") {
@@ -394,12 +397,12 @@ func archiveCmd() {
 		return true
 	}).([]AtCoderSubmission)
 
-	//rev sort by EpochSecond
+	// rev sort by EpochSecond
 	sort.Slice(ss, func(i, j int) bool {
 		return ss[i].EpochSecond > ss[j].EpochSecond
 	})
 
-	//filter latest submission for each problem
+	// filter latest submission for each problem
 	v := map[string]struct{}{}
 	ss = funk.Filter(ss, func(s AtCoderSubmission) bool {
 		_, ok := v[s.ContestID+"_"+s.ProblemID]
@@ -415,7 +418,7 @@ func archiveCmd() {
 	funk.ForEach(ss, func(s AtCoderSubmission) {
 		url := fmt.Sprintf("https://atcoder.jp/contests/%s/submissions/%s", s.ContestID, strconv.Itoa(s.ID))
 
-		//log.Printf("Requesting... %s", url)
+		// log.Printf("Requesting... %s", url)
 		elapsedTime := time.Now().Sub(startTime)
 		if elapsedTime.Milliseconds() < 1500 {
 			sleepTime := time.Duration(1500 - elapsedTime.Milliseconds())
@@ -454,8 +457,8 @@ func archiveCmd() {
 				return
 			}
 			log.Println("archived the code at ", filepath.Join(archiveDirPath, fileName))
-			//If the archive repo is the git repo
-			//git add and git commit
+			// If the archive repo is the git repo
+			// git add and git commit
 			if !isDirExist(filepath.Join(config.Atcoder.RepositoryPath, ".git")) {
 				return
 			}
@@ -471,7 +474,7 @@ func archiveCmd() {
 				log.Println(err)
 				return
 			}
-			//add source code
+			// add source code
 			fmt.Println(fileName)
 			dirPath := filepath.Join("atcoder.jp", contestID, problemID)
 			_, err = w.Add(filepath.Join(dirPath, fileName))
@@ -481,7 +484,7 @@ func archiveCmd() {
 				return
 			}
 
-			//add submission json
+			// add submission json
 			_, err = w.Add(filepath.Join(dirPath, "submission.json"))
 			if err != nil {
 				log.Println(err)
@@ -504,19 +507,20 @@ func archiveCmd() {
 		})
 	})
 }
+
 func validateConfig(config Config) bool {
-	//TODO check path
+	// TODO check path
 	return false
 }
-func editCmd() {
 
+func editCmd() {
 	home, err := homedir.Dir()
 	if err != nil {
 		log.Println(err)
 		return
 	}
 	configFile := filepath.Join(home, "."+APP_NAME, "config.json")
-	//Config file not found, force to run an init cmd
+	// Config file not found, force to run an init cmd
 	if !isFileExist(configFile) {
 		initCmd(true)
 	}
@@ -531,12 +535,11 @@ func editCmd() {
 	} else {
 		open.Run(configFile)
 	}
-
 }
 
 func main() {
-
-	app := cli.App{Name: "procon-gardener", Usage: "archive your AC submissions",
+	app := cli.App{
+		Name: "procon-gardener", Usage: "archive your AC submissions",
 		Commands: []*cli.Command{
 			{
 				Name:    "archive",
