@@ -1,11 +1,14 @@
 package main
 
 import (
+	"compress/gzip"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io/ioutil"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -14,20 +17,18 @@ import (
 	"strings"
 	"time"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/go-git/go-git/v5"
 	"github.com/go-git/go-git/v5/plumbing/object"
-
-	"github.com/PuerkitoBio/goquery"
-
-	homedir "github.com/mitchellh/go-homedir"
+	"github.com/mitchellh/go-homedir"
 	"github.com/skratchdot/open-golang/open"
-	"github.com/thoas/go-funk"
 	cli "github.com/urfave/cli/v2"
 )
 
 const (
-	APP_NAME                   = "procon-gardener"
-	ATCODER_API_SUBMISSION_URL = "https://kenkoooo.com/atcoder/atcoder-api/results?user="
+	appName             = "procon-gardener"
+	submissionsEndpoint = "https://kenkoooo.com/atcoder/atcoder-api/v3/user/submissions"
+	submissionsPerPage  = 500
 )
 
 type AtCoderSubmission struct {
@@ -43,7 +44,7 @@ type AtCoderSubmission struct {
 	ExecutionTime int     `json:"execution_time"`
 }
 
-func isDirExist(path string) bool {
+func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	if err != nil && os.IsNotExist(err) {
 		return false
@@ -51,7 +52,7 @@ func isDirExist(path string) bool {
 	return info.IsDir()
 }
 
-func isFileExist(path string) bool {
+func fileExists(path string) bool {
 	_, err := os.Stat(path)
 	return err == nil
 }
@@ -67,229 +68,107 @@ type Config struct {
 }
 
 func languageToFileName(language string) string {
+	name := "Main"
 	// e.g C++14 (GCC 5.4.1)
 	// C++14
 	language = strings.Split(language, "(")[0]
 	// remove extra last whitespace
-	language = language[:len(language)-1]
-	if strings.HasPrefix(language, "C++") {
-		return "Main.cpp"
+	language = strings.TrimSpace(language)
+
+	prefixes := map[string]string{
+		"C++":         ".cpp",
+		"Bash":        ".sh",
+		"Common Lisp": ".lisp",
+		"Python":      ".py",
+		"PyPy":        ".py",
 	}
-	if strings.HasPrefix(language, "Bash") {
-		return "Main.sh"
+	for p, ext := range prefixes {
+		if strings.HasPrefix(language, p) {
+			return name + ext
+		}
 	}
 
-	// C (GCC 5.4.1)
-	// C (Clang 3.8.0)
-	if language == "C" {
-		return "Main.c"
+	names := map[string]string{
+		"C":            ".c",
+		"C#":           ".cs",
+		"Clojure":      ".clj",
+		"D":            ".d",
+		"Fortran":      ".f08",
+		"Go":           ".go",
+		"Haskell":      ".hs",
+		"JavaScript":   ".js",
+		"Java":         ".java",
+		"OCaml":        ".ml",
+		"Pascal":       ".pas",
+		"Perl":         ".pl",
+		"PHP":          ".php",
+		"Ruby":         ".rb",
+		"Scala":        ".scala",
+		"Scheme":       ".scm",
+		"Main.txt":     ".txt",
+		"Visual Basic": ".vb",
+		"Objective-C":  ".m",
+		"Swift":        ".swift",
+		"Rust":         ".rs",
+		"Sed":          ".sed",
+		"Awk":          ".awk",
+		"Brainfuck":    ".bf",
+		"Standard ML":  ".sml",
+		"Crystal":      ".cr",
+		"F#":           ".fs",
+		"Unlambda":     ".unl",
+		"Lua":          ".lua",
+		"LuaJIT":       ".lua",
+		"MoonScript":   ".moon",
+		"Ceylon":       ".ceylon",
+		"Julia":        ".jl",
+		"Octave":       ".m",
+		"Nim":          ".nim",
+		"TypeScript":   ".ts",
+		"Perl6":        ".p6",
+		"Kotlin":       ".kt",
+		"COBOL":        ".cob",
 	}
-
-	if language == "C#" {
-		return "Main.cs"
-	}
-
-	if language == "Clojure" {
-		return "Main.clj"
-	}
-
-	if strings.HasPrefix(language, "Common Lisp") {
-		return "Main.lisp"
-	}
-
-	// D (DMD64 v2.070.1)
-	if language == "D" {
-		return "Main.d"
-	}
-
-	if language == "Fortran" {
-		return "Main.f08"
-	}
-
-	if language == "Go" {
-		return "Main.go"
-	}
-
-	if language == "Haskell" {
-		return "Main.hs"
-	}
-
-	if language == "JavaScript" {
-		return "Main.js"
-	}
-	if language == "Java" {
-		return "Main.java"
-	}
-	if language == "OCaml" {
-		return "Main.ml"
-	}
-
-	if language == "Pascal" {
-		return "Main.pas"
-	}
-
-	if language == "Perl" {
-		return "Main.pl"
-	}
-
-	if language == "PHP" {
-		return "Main.php"
-	}
-
-	if strings.HasPrefix(language, "Python") {
-		return "Main.py"
-	}
-
-	if language == "Ruby" {
-		return "Main.rb"
-	}
-
-	if language == "Scala" {
-		return "Main.scala"
-	}
-
-	if language == "Scheme" {
-		return "Main.scm"
-	}
-
-	if language == "Main.txt" {
-		return "Main.txt"
-	}
-
-	if language == "Visual Basic" {
-		return "Main.vb"
-	}
-
-	if language == "Objective-C" {
-		return "Main.m"
-	}
-
-	if language == "Swift" {
-		return "Main.swift"
-	}
-
-	if language == "Rust" {
-		return "Main.rs"
-	}
-
-	if language == "Sed" {
-		return "Main.sed"
-	}
-
-	if language == "Awk" {
-		return "Main.awk"
-	}
-
-	if language == "Brainfuck" {
-		return "Main.bf"
-	}
-
-	if language == "Standard ML" {
-		return "Main.sml"
-	}
-
-	if strings.HasPrefix(language, "PyPy") {
-		return "Main.py"
-	}
-
-	if language == "Crystal" {
-		return "Main.cr"
-	}
-
-	if language == "F#" {
-		return "Main.fs"
-	}
-
-	if language == "Unlambda" {
-		return "Main.unl"
-	}
-
-	if language == "Lua" {
-		return "Main.lua"
-	}
-
-	if language == "LuaJIT" {
-		return "Main.lua"
-	}
-
-	if language == "MoonScript" {
-		return "Main.moon"
-	}
-
-	if language == "Ceylon" {
-		return "Main.ceylon"
-	}
-
-	if language == "Julia" {
-		return "Main.jl"
-	}
-
-	if language == "Octave" {
-		return "Main.m"
-	}
-
-	if language == "Nim" {
-		return "Main.nim"
-	}
-
-	if language == "TypeScript" {
-		return "Main.ts"
-	}
-
-	if language == "Perl6" {
-		return "Main.p6"
-	}
-
-	if language == "Kotlin" {
-		return "Main.kt"
-	}
-
-	if language == "COBOL" {
-		return "Main.cob"
+	for n, ext := range names {
+		if n == language {
+			return name + ext
+		}
 	}
 
 	log.Printf("Unknown ... %s", language)
-	return "Main.txt"
+	return name + ".txt"
 }
 
-func initCmd(strict bool) {
+func initCmd(strict bool) error {
 	log.Println("Initialize your config...")
 	home, err := homedir.Dir()
 	if err != nil {
-		log.Println(err)
-		return
+		return err
 	}
-	configDir := filepath.Join(home, "."+APP_NAME)
-	if !isDirExist(configDir) {
+	configDir := filepath.Join(home, "."+appName)
+	if !dirExists(configDir) {
 		err = os.MkdirAll(configDir, 0o700)
 		if err != nil {
-			log.Println(err)
-			return
+			return err
 		}
 	}
 
 	configFile := filepath.Join(configDir, "config.json")
-	if strict || !isFileExist(configFile) {
+	if strict || !fileExists(configFile) {
 		// initial config
-		atcoder := Service{RepositoryPath: "", UserID: ""}
-
-		config := Config{Atcoder: atcoder}
+		config := Config{Atcoder: Service{RepositoryPath: "", UserID: ""}}
 
 		jsonBytes, err := json.MarshalIndent(config, "", "\t")
 		if err != nil {
-			log.Println(err)
-			return
+			return err
 		}
-		json := string(jsonBytes)
-		file, err := os.Create(filepath.Join(configDir, "config.json"))
-		if err != nil {
-			log.Println(err)
-			return
+		if err := os.WriteFile(filepath.Join(configDir, "config.json"), jsonBytes, 0o666); err != nil {
+			return err
 		}
-		defer file.Close()
-		file.WriteString(json)
+		return nil
 	}
 	log.Println("Initialized your config at ", configFile)
+	return nil
 }
 
 func loadConfig() (*Config, error) {
@@ -297,7 +176,7 @@ func loadConfig() (*Config, error) {
 	if err != nil {
 		return nil, err
 	}
-	configDir := filepath.Join(home, "."+APP_NAME)
+	configDir := filepath.Join(home, "."+appName)
 	configFile := filepath.Join(configDir, "config.json")
 	bytes, err := ioutil.ReadFile(configFile)
 	if err != nil {
@@ -315,214 +194,199 @@ func archiveFile(code, fileName, path string, submission AtCoderSubmission) erro
 	if err := os.MkdirAll(path, 0o700); err != nil {
 		return err
 	}
-	filePath := filepath.Join(path, fileName)
-	file, err := os.Create(filePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	file.WriteString(code)
 
-	{
-		// save submission json file
-		jsonBytes, err := json.MarshalIndent(submission, "", "\t")
-		if err != nil {
-			log.Println(err)
-		}
-		json := string(jsonBytes)
-		file, err := os.Create(filepath.Join(path, "submission.json"))
-		if err != nil {
-			log.Println(err)
-		}
-		defer file.Close()
-		file.WriteString(json)
+	if err := os.WriteFile(filepath.Join(path, fileName), []byte(code), 0o666); err != nil {
+		return err
 	}
 	return nil
 }
 
-func archiveCmd() {
-	config, err := loadConfig()
+func submissionsRequest(userID string, fromSecond int64) (*http.Request, error) {
+	u, err := url.Parse(submissionsEndpoint)
 	if err != nil {
-		log.Println(err)
-		return
+		return nil, err
 	}
-	resp, err := http.Get(ATCODER_API_SUBMISSION_URL + config.Atcoder.UserID)
+	q := u.Query()
+	q.Set("user", userID)
+	q.Set("from_second", strconv.FormatInt(fromSecond, 10))
+	u.RawQuery = q.Encode()
+	req, err := http.NewRequest(http.MethodGet, u.String(), nil)
 	if err != nil {
-		log.Println(err)
-		return
+		return nil, err
+	}
+	req.Header.Set("Accept-Encoding", "gzip")
+	return req, nil
+}
+
+func fetchSubmissionsOnce(userID string, fromSecond int64) ([]AtCoderSubmission, error) {
+	req, err := submissionsRequest(userID, fromSecond)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("request to %s", req.URL.String())
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		return nil, err
 	}
 	defer resp.Body.Close()
-	bytes, err := ioutil.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("status code is not OK: %s", resp.Status)
+	}
+	r, err := gzip.NewReader(resp.Body)
 	if err != nil {
-		log.Println(err)
-		return
+		return nil, err
 	}
 	var ss []AtCoderSubmission
-	err = json.Unmarshal(bytes, &ss)
+	if err := json.NewDecoder(r).Decode(&ss); err != nil {
+		return nil, err
+	}
+	return ss, nil
+}
+
+func fetchSubmissions(userID string) ([]AtCoderSubmission, error) {
+	result := make([]AtCoderSubmission, 0)
+	fromSecond := int64(0)
+	for {
+		ss, err := fetchSubmissionsOnce(userID, fromSecond)
+		if err != nil {
+			return nil, err
+		}
+		result = append(result, ss...)
+		if len(ss) < submissionsPerPage {
+			return result, nil
+		}
+
+		fromSecond = ss[len(ss)-1].EpochSecond
+	}
+}
+
+// filter not AC submissions
+func filterNotAC(ss []AtCoderSubmission) []AtCoderSubmission {
+	result := make([]AtCoderSubmission, 0, len(ss))
+	for _, s := range ss {
+		if s.Result == "AC" {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+func directoryPath(repoPath string, s AtCoderSubmission) string {
+	return filepath.Join(repoPath, s.ContestID, s.ProblemID, strconv.Itoa(s.ID))
+}
+
+func filterDirsExist(repoPath string, ss []AtCoderSubmission) []AtCoderSubmission {
+	result := make([]AtCoderSubmission, 0, len(ss))
+	for _, s := range ss {
+		if !dirExists(directoryPath(repoPath, s)) {
+			result = append(result, s)
+		}
+	}
+	return result
+}
+
+func archiveCmd() error {
+	config, err := loadConfig()
 	if err != nil {
-		log.Println(err)
-		return
+		return err
+	}
+	ss, err := fetchSubmissions(config.Atcoder.UserID)
+	if err != nil {
+		return err
 	}
 
-	// only ac
-	ss = funk.Filter(ss, func(s AtCoderSubmission) bool {
-		return s.Result == "AC"
-	}).([]AtCoderSubmission)
-
-	// skip the already archived code
-	archivedKeys := map[string]struct{}{}
-	filepath.Walk(config.Atcoder.RepositoryPath, func(path string, info os.FileInfo, err error) error {
-		if !info.IsDir() && strings.HasSuffix(path, "submission.json") {
-			bytes, err := ioutil.ReadFile(path)
-			if err != nil {
-				log.Println(err)
-				return err
-			}
-			var submission AtCoderSubmission
-			if err = json.Unmarshal(bytes, &submission); err != nil {
-				log.Println(err)
-				return err
-			}
-			key := submission.ContestID + "_" + submission.ProblemID
-			archivedKeys[key] = struct{}{}
-		}
-		return nil
-	})
-	ss = funk.Filter(ss, func(s AtCoderSubmission) bool {
-		key := s.ContestID + "_" + s.ProblemID
-		_, ok := archivedKeys[key]
-		if ok {
-			return false
-		}
-		return true
-	}).([]AtCoderSubmission)
-
-	// rev sort by EpochSecond
+	ss = filterNotAC(ss)
+	ss = filterDirsExist(config.Atcoder.RepositoryPath, ss)
 	sort.Slice(ss, func(i, j int) bool {
-		return ss[i].EpochSecond > ss[j].EpochSecond
+		return ss[i].EpochSecond < ss[j].EpochSecond
 	})
-
-	// filter latest submission for each problem
-	v := map[string]struct{}{}
-	ss = funk.Filter(ss, func(s AtCoderSubmission) bool {
-		_, ok := v[s.ContestID+"_"+s.ProblemID]
-		if ok {
-			return false
-		}
-		v[s.ContestID+"_"+s.ProblemID] = struct{}{}
-		return true
-	}).([]AtCoderSubmission)
 
 	startTime := time.Now()
 	log.Printf("Archiving %d code...", len(ss))
-	funk.ForEach(ss, func(s AtCoderSubmission) {
-		url := fmt.Sprintf("https://atcoder.jp/contests/%s/submissions/%s", s.ContestID, strconv.Itoa(s.ID))
 
-		// log.Printf("Requesting... %s", url)
-		elapsedTime := time.Now().Sub(startTime)
-		if elapsedTime.Milliseconds() < 1500 {
-			sleepTime := time.Duration(1500 - elapsedTime.Milliseconds())
-			time.Sleep(time.Millisecond * sleepTime)
+	for _, s := range ss {
+		time.Sleep(time.Until(startTime.Add(1500 * time.Millisecond)))
+		u := fmt.Sprintf("https://atcoder.jp/contests/%s/submissions/%d", s.ContestID, s.ID)
+		log.Printf("Requesting... %s", u)
+
+		resp, err := http.Get(u)
+		if err != nil {
+			return err
 		}
-		resp, err := http.Get(url)
 		defer resp.Body.Close()
 		startTime = time.Now()
 		if err != nil {
-			log.Println(err)
-			return
+			return err
 		}
 
 		doc, err := goquery.NewDocumentFromReader(resp.Body)
 		if err != nil {
-			log.Println(err)
-			return
+			return err
 		}
-		userID := s.UserID
-		userEmail := config.Atcoder.UserEmail
-		language := s.Language
-		contestID := s.ContestID
-		problemID := s.ProblemID
-		epochSecond := s.EpochSecond
-		doc.Find(".linenums").Each(func(i int, gs *goquery.Selection) {
-			code := gs.Text()
+		selection := doc.Find(".linenums")
+		for i := 0; i < selection.Length(); i++ {
+			code := selection.Eq(i).Text()
 			if code == "" {
-				log.Print("Empty string...")
-				return
+				return errors.New("Empty string...")
 			}
-			fileName := languageToFileName(language)
-			archiveDirPath := filepath.Join(config.Atcoder.RepositoryPath, "atcoder.jp", contestID, problemID)
+			fileName := languageToFileName(s.Language)
+			archiveDirPath := directoryPath(config.Atcoder.RepositoryPath, s)
 
-			if err = archiveFile(code, fileName, archiveDirPath, s); err != nil {
-				log.Println("Fail to archive the code at", filepath.Join(archiveDirPath, fileName))
-				return
+			if err := archiveFile(code, fileName, archiveDirPath, s); err != nil {
+				return fmt.Errorf("fail to archive the code at %s: %w", filepath.Join(archiveDirPath, fileName), err)
 			}
-			log.Println("archived the code at ", filepath.Join(archiveDirPath, fileName))
+			log.Printf("archived the code at %s", filepath.Join(archiveDirPath, fileName))
 			// If the archive repo is the git repo
 			// git add and git commit
-			if !isDirExist(filepath.Join(config.Atcoder.RepositoryPath, ".git")) {
-				return
+			if !dirExists(filepath.Join(config.Atcoder.RepositoryPath, ".git")) {
+				continue
 			}
 
 			r, err := git.PlainOpen(config.Atcoder.RepositoryPath)
 			if err != nil {
-				log.Println(err)
-				return
+				return err
 			}
 
 			w, err := r.Worktree()
 			if err != nil {
-				log.Println(err)
-				return
+				return err
 			}
 			// add source code
-			fmt.Println(fileName)
-			dirPath := filepath.Join("atcoder.jp", contestID, problemID)
-			_, err = w.Add(filepath.Join(dirPath, fileName))
+			dirRelativePath, err := filepath.Rel(config.Atcoder.RepositoryPath, archiveDirPath)
 			if err != nil {
-				log.Println(err)
-
-				return
+				return err
+			}
+			_, err = w.Add(filepath.Join(dirRelativePath, fileName))
+			if err != nil {
+				return err
 			}
 
-			// add submission json
-			_, err = w.Add(filepath.Join(dirPath, "submission.json"))
-			if err != nil {
-				log.Println(err)
-				return
-			}
-
-			message := fmt.Sprintf("[AC] %s %s", contestID, problemID)
+			message := fmt.Sprintf("✅ %s %s %dms %s", s.ContestID, s.ProblemID, s.ExecutionTime, u)
 			_, err = w.Commit(message, &git.CommitOptions{
 				Author: &object.Signature{
-					Name:  userID,
-					Email: userEmail,
-					When:  time.Unix(epochSecond, 0),
+					Name:  s.UserID,
+					Email: config.Atcoder.UserEmail,
+					When:  time.Unix(s.EpochSecond, 0),
 				},
 			})
 			if err != nil {
-				log.Println(err)
-				return
+				return err
 			}
-			return
-		})
-	})
+		}
+	}
+	return nil
 }
 
-func validateConfig(config Config) bool {
-	// TODO check path
-	return false
-}
-
-func editCmd() {
+func editCmd() error {
 	home, err := homedir.Dir()
 	if err != nil {
-		log.Println(err)
-		return
+		return err
 	}
-	configFile := filepath.Join(home, "."+APP_NAME, "config.json")
+	configFile := filepath.Join(home, "."+appName, "config.json")
 	// Config file not found, force to run an init cmd
-	if !isFileExist(configFile) {
-		initCmd(true)
+	if !fileExists(configFile) {
+		return initCmd(true)
 	}
 
 	editor := os.Getenv("EDITOR")
@@ -531,10 +395,10 @@ func editCmd() {
 		c.Stdin = os.Stdin
 		c.Stdout = os.Stdout
 		c.Stderr = os.Stderr
-		c.Run()
-	} else {
-		open.Run(configFile)
+		return c.Run()
 	}
+
+	return open.Run(configFile)
 }
 
 func main() {
@@ -546,8 +410,7 @@ func main() {
 				Aliases: []string{"a"},
 				Usage:   "archive your AC submissions",
 				Action: func(c *cli.Context) error {
-					archiveCmd()
-					return nil
+					return archiveCmd()
 				},
 			},
 			{
@@ -555,8 +418,7 @@ func main() {
 				Aliases: []string{"i"},
 				Usage:   "initialize your config",
 				Action: func(c *cli.Context) error {
-					initCmd(true)
-					return nil
+					return initCmd(true)
 				},
 			},
 			{
@@ -564,8 +426,7 @@ func main() {
 				Aliases: []string{"e"},
 				Usage:   "edit your config file",
 				Action: func(c *cli.Context) error {
-					editCmd()
-					return nil
+					return editCmd()
 				},
 			},
 		},
